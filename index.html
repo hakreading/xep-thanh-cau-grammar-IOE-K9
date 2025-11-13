@@ -542,7 +542,7 @@
                 { en: "Is she getting used to spicy food?", vi: "Cô ấy có đang quen ăn đồ cay không?", emoji: "🤔" },
                 { en: "Are we getting used to speaking English in class?", vi: "Chúng ta có đang quen nói tiếng Anh trong lớp không?", emoji: "🗣️" },
                 { en: "Is he getting used to working hard?", vi: "Anh ấy có đang quen làm việc chăm chỉ không?", emoji: "💪" },
-                { en: "Are they getting used to living in a big city?", vi: "Họ có đang quen sống ở thành phố lớn không?", emoji: "🏙️" }
+                { en: "Are they used to living in a big city?", vi: "Họ có đang quen sống ở thành phố lớn không?", emoji: "🏙️" }
             ],
             "19. Động từ khuyết thiếu": [
                 { en: "I can swim.", vi: "Tôi có thể bơi.", emoji: "🏊" },
@@ -1146,7 +1146,21 @@
         // --- HOOKS ---
         function useSpeechSynthesis() {
             const [isSpeaking, setIsSpeaking] = useState(false);
+            const [voices, setVoices] = useState([]);
             const synth = typeof window !== 'undefined' ? window.speechSynthesis : null;
+
+            useEffect(() => {
+                if (!synth) return;
+                const loadVoices = () => {
+                    setVoices(synth.getVoices().filter(v => v.lang.startsWith('en-')));
+                };
+                loadVoices();
+                synth.onvoiceschanged = loadVoices;
+                return () => {
+                    synth.onvoiceschanged = null;
+                };
+            }, [synth]);
+
 
             const speak = useCallback((text, options = {}) => {
                 if (!synth) return;
@@ -1154,6 +1168,9 @@
                 const utterance = new SpeechSynthesisUtterance(text);
                 utterance.lang = 'en-US';
                 utterance.rate = options.rate || 0.9;
+                if (options.voice) {
+                    utterance.voice = options.voice;
+                }
                 utterance.onstart = () => setIsSpeaking(true);
                 utterance.onend = () => {
                     setIsSpeaking(false);
@@ -1182,7 +1199,7 @@
                 return () => cancel();
             }, [cancel]);
 
-            return { isSpeaking, speak, cancel };
+            return { isSpeaking, speak, cancel, voices };
         }
 
         // --- COMPONENTS ---
@@ -1447,11 +1464,19 @@
             const [isLocked, setIsLocked] = useState(false);
             const [errors, setErrors] = useState([]);
             const [isHintVisible, setIsHintVisible] = useState(false);
+            const [selectedVoice, setSelectedVoice] = useState(null);
 
-            const { isSpeaking, speak, cancel } = useSpeechSynthesis();
+            const { isSpeaking, speak, cancel, voices } = useSpeechSynthesis();
             const nextSentenceTimeoutRef = useRef(null);
 
             const currentSentence = sentences[currentIndex];
+
+            useEffect(() => {
+                if (voices.length > 0 && !selectedVoice) {
+                    const defaultVoice = voices.find(v => v.name.includes('Google US English')) || voices[0];
+                    setSelectedVoice(defaultVoice);
+                }
+            }, [voices, selectedVoice]);
 
             const startNewSentence = useCallback((index) => {
                 cancel();
@@ -1469,8 +1494,8 @@
                 setIsLocked(false);
 
                 const sentenceToSpeak = sentences[index].en;
-                speak(sentenceToSpeak, { onEnd: () => speak(sentenceToSpeak) });
-            }, [sentences, cancel, speak]);
+                speak(sentenceToSpeak, { voice: selectedVoice, onEnd: () => speak(sentenceToSpeak, { voice: selectedVoice }) });
+            }, [sentences, cancel, speak, selectedVoice]);
 
             useEffect(() => {
                 startNewSentence(0);
@@ -1502,6 +1527,7 @@
                     cancel();
 
                     speak(correctAnswer, {
+                        voice: selectedVoice,
                         onEnd: () => {
                             if (isLastSentence) {
                                 onGameEnd({ score: newScore, correctCount: newCorrectCount, errors });
@@ -1556,7 +1582,7 @@
 
             const handleListenAgain = () => {
                 if (!isSpeaking) {
-                    speak(currentSentence.en);
+                    speak(currentSentence.en, { voice: selectedVoice });
                 }
             };
 
@@ -1604,6 +1630,27 @@
                     </div>
 
                     <div className={`text-lg font-bold min-h-[28px] ${isCorrect ? 'text-green-600' : 'text-red-600'}`}>{message}</div>
+
+                     <div className="flex justify-center items-center gap-2 mb-3">
+                        <label htmlFor="voice-select" className="font-semibold text-gray-700">Giọng đọc:</label>
+                        <select
+                            id="voice-select"
+                            className="p-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-pink-400 disabled:bg-gray-200"
+                            value={selectedVoice ? selectedVoice.voiceURI : ''}
+                            onChange={(e) => {
+                                const voice = voices.find(v => v.voiceURI === e.target.value);
+                                if (voice) setSelectedVoice(voice);
+                            }}
+                            disabled={voices.length === 0 || isLocked}
+                        >
+                            {voices.map((voice) => (
+                                <option key={voice.voiceURI} value={voice.voiceURI}>
+                                    {voice.name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+
                     <div className="flex flex-wrap justify-center gap-3">
                         <button onClick={handleListenAgain} disabled={isSpeaking || isLocked} className="px-7 py-3 text-lg font-bold text-white bg-blue-500 rounded-xl shadow-md hover:bg-blue-600 disabled:bg-gray-400 transform hover:-translate-y-0.5 transition">Nghe lại</button>
                         <button onClick={handleCheckAnswer} disabled={isLocked || userAnswer.length === 0} className="px-7 py-3 text-lg font-bold text-white bg-green-500 rounded-xl shadow-md hover:bg-green-600 disabled:bg-gray-400 transform hover:-translate-y-0.5 transition">Kiểm tra</button>
